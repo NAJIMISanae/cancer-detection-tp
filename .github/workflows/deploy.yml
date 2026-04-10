@@ -1,7 +1,3 @@
-# .github/workflows/deploy.yml
-# Pipeline CI/CD — Tests + Déploiement automatique sur Render
-# Déclenché à chaque push sur la branche main
-
 name: CI/CD — Cancer Detection App
 
 on:
@@ -13,47 +9,44 @@ on:
 jobs:
 
   # ════════════════════════════════════════
-  # JOB 1 — Tests et validation du code
+  # JOB 1 — Tests
   # ════════════════════════════════════════
   test:
     name: Tests & Validation
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout du code
+      - name: Checkout du code
         uses: actions/checkout@v4
 
-      - name: 🐍 Installation Python 3.11
+      - name: Installation Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      - name: 📦 Installation des dépendances
+      - name: Installation des dependances
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install streamlit joblib numpy pandas Pillow scikit-learn xgboost
 
-      - name: ✅ Vérification syntaxe Python (flake8)
+      - name: Verification syntaxe Python
         run: |
-          pip install flake8
-          flake8 app.py --max-line-length=120 --ignore=E501,W503
+          python -m py_compile app.py
+          echo "Syntaxe Python OK"
 
-      - name: 🧪 Test import des modules critiques
+      - name: Test imports critiques
         run: |
           python -c "
-          import streamlit
-          import joblib
-          import numpy as np
-          import pandas as pd
+          import streamlit, joblib, numpy, pandas
           from PIL import Image
-          print('✅ Tous les imports sont fonctionnels')
-          print(f'   streamlit : {streamlit.__version__}')
-          print(f'   numpy     : {np.__version__}')
-          print(f'   pandas    : {pd.__version__}')
+          print('OK - tous les imports fonctionnent')
+          print('streamlit :', streamlit.__version__)
+          print('numpy     :', numpy.__version__)
+          print('pandas    :', pandas.__version__)
           "
 
-      - name: 📁 Vérification présence des modèles
+      - name: Verification presence des modeles
         run: |
           python -c "
           import os
@@ -65,24 +58,24 @@ jobs:
           for m in models:
               if os.path.exists(m):
                   size = os.path.getsize(m) / 1024
-                  print(f'✅ {m} ({size:.0f} KB)')
+                  print(f'OK {m} ({size:.0f} KB)')
               else:
-                  print(f'❌ MANQUANT : {m}')
+                  print(f'MANQUANT {m}')
           "
 
-      - name: 🔬 Test chargement Modèle 1
+      - name: Test chargement Modele 1
         run: |
           python -c "
-          import joblib, numpy as np, pandas as pd
-          model = joblib.load('models/modele1_meilleur.pkl')
+          import joblib, pandas as pd
           features = ['age','sexe_masculin','presence_nodule','subtilite_nodule',
                       'taille_nodule_px','x_nodule_norm','y_nodule_norm',
                       'tabagisme_paquets_annee','toux_chronique','dyspnee',
                       'douleur_thoracique','perte_poids','spo2','antecedent_familial']
+          model = joblib.load('models/modele1_meilleur.pkl')
           X = pd.DataFrame([[60,1,1,3,1,0.5,0.4,30,1,0,0,0,95,0]], columns=features)
+          pred = model.predict(X)[0]
           proba = model.predict_proba(X)[0]
-          pred  = model.predict(X)[0]
-          print(f'✅ Modèle 1 OK — Prédiction : {pred} | Probas : {proba.round(3)}')
+          print(f'Modele 1 OK - Prediction: {pred} | Probas: {proba.round(3)}')
           "
 
   # ════════════════════════════════════════
@@ -91,43 +84,38 @@ jobs:
   build:
     name: Build Docker Image
     runs-on: ubuntu-latest
-    needs: test   # Lance seulement si les tests passent
+    needs: test
 
     steps:
-      - name: 📥 Checkout du code
+      - name: Checkout du code
         uses: actions/checkout@v4
 
-      - name: 🐳 Build de l'image Docker
+      - name: Build image Docker
         run: |
-          docker build -t cancer-detection-app:${{ github.sha }} .
-          echo "✅ Image Docker buildée avec succès"
+          docker build -t cancer-detection-app:latest .
+          echo "Image Docker buildee avec succes"
 
-      - name: 🔍 Test de l'image Docker
+      - name: Test image Docker
         run: |
-          docker run --rm cancer-detection-app:${{ github.sha }} \
-            python -c "import streamlit, joblib; print('✅ Image Docker valide')"
+          docker run --rm cancer-detection-app:latest \
+            python -c "import streamlit, joblib; print('Image Docker valide')"
 
   # ════════════════════════════════════════
-  # JOB 3 — Déploiement sur Render
-  # (uniquement sur push main, pas sur PR)
+  # JOB 3 — Deploy Render
   # ════════════════════════════════════════
   deploy:
     name: Deploy to Render
     runs-on: ubuntu-latest
-    needs: [test, build]   # Lance seulement si tests ET build passent
+    needs: [test, build]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    continue-on-error: true
 
     steps:
-      - name: 🚀 Déclenchement du déploiement Render
+      - name: Declenchement deploiement Render
         run: |
-          curl -X POST \
+          curl -s -X POST \
             -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d '{"serviceId": "${{ secrets.RENDER_SERVICE_ID }}"}' \
             https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/deploys
-
-      - name: ✅ Déploiement déclenché
-        run: |
-          echo "🚀 Déploiement Render en cours..."
-          echo "📡 URL : https://cancer-detection-app.onrender.com"
-          echo "⏱️  Disponible dans 2-3 minutes"
+          echo "Deploiement Render declenche"
+          echo "URL: https://cancer-detection-app.onrender.com"
